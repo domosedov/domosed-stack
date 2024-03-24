@@ -1,8 +1,7 @@
+import { ReactAriaRouterProvider } from "@/shared/ui/react_aria/react_aria_router_provider";
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -16,7 +15,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body
+        className={
+          "bg-gradient-to-br from-indigo-50 via-white to-violet-50 min-h-[100dvh]"
+        }
+      >
+        <ReactAriaRouterProvider>
+          <nav className="border-b border-b-gray-400 p-2">
+            <Link href="/">Home</Link>
+            <Link href="/ui/headless">UI-Headless</Link>
+          </nav>
+          {children}
+        </ReactAriaRouterProvider>
+      </body>
     </html>
   );
 }
