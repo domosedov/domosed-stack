@@ -4,18 +4,21 @@ import {
   DataRef,
   DndContext,
   DragEndEvent,
+  DragMoveEvent,
   DragOverlay,
   DragStartEvent,
   KeyboardSensor,
   PointerSensor,
   TouchSensor,
   UniqueIdentifier,
+  closestCenter,
   closestCorners,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
 import {
   SortableContext,
+  arrayMove,
   horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
@@ -30,25 +33,39 @@ import {
   ReactNode,
   forwardRef,
   useId,
+  useMemo,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
+import { ContainerInner } from "./container";
+import { ItemInner } from "./item";
 
-enum Kind {
-  item = "item",
-  container = "container",
-}
+const Kind = {
+  item: "item",
+  container: "container",
+} as const;
+
+type Kind = keyof typeof Kind;
 
 type ItemType = {
-  kind: Kind.item;
+  kind: typeof Kind.item;
   id: UniqueIdentifier;
   title: string;
   containerId: UniqueIdentifier | null;
 };
 
 type ContainerType = {
-  kind: Kind.container;
+  kind: typeof Kind.container;
   id: UniqueIdentifier;
   title: string;
+};
+
+type Payload = {
+  kind: Kind;
+};
+
+type DataPayload = {
+  current?: Payload;
 };
 
 export default function DndPage() {
@@ -60,7 +77,7 @@ export default function DndPage() {
   const [items, setItems] = useState<ItemType[]>([
     { id: "1", title: "Item 1", containerId: "droppable-1", kind: Kind.item },
     { id: "2", title: "Item 2", containerId: "droppable-1", kind: Kind.item },
-    { id: "3", title: "Item 3", containerId: "droppable-2", kind: Kind.item },
+    { id: "3", title: "Item 3", containerId: "droppable-1", kind: Kind.item },
   ]);
 
   const [containers, setContainers] = useState<ContainerType[]>([
@@ -76,6 +93,11 @@ export default function DndPage() {
     },
   ]);
 
+  const containersIds = useMemo(
+    () => containers.map((c) => c.id),
+    [containers]
+  );
+
   const contextId = useId();
 
   const sensors = useSensors(
@@ -87,33 +109,111 @@ export default function DndPage() {
   );
 
   function handleDragStart(event: DragStartEvent) {
-    console.log("DragStartEvent", event);
-    const {
-      active: { id, data },
-    } = event;
+    const { active } = event;
 
-    const kind = (data as DataRef<{ kind: Kind }>)?.current?.kind;
-
-    if (id && kind) setActiveElement({ id, kind });
+    setActiveElement({
+      id: active.id,
+      kind: active.data.current?.kind as Kind,
+    });
   }
 
-  function handleDragEnd(_event: DragEndEvent) {
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+
+    if (!over) return;
+
+    const activeId = active.id;
+    const overId = over.id;
+
+    if (activeId === overId) return;
+
+    const isActiveAContainer = active.data.current?.kind === Kind.container;
+    if (!isActiveAContainer) return;
+
+    if (over.data.current?.kind === Kind.container) {
+      setContainers((containers) => {
+        const activeContainerIndex = containers.findIndex(
+          (col) => col.id === activeId
+        );
+
+        const overContainerIndex = containers.findIndex(
+          (col) => col.id === overId
+        );
+
+        return arrayMove(containers, activeContainerIndex, overContainerIndex);
+      });
+    }
+
     setActiveElement(null);
+  }
+
+  function handlerDragMove(event: DragMoveEvent) {
+    const { active, over } = event;
+
+    if (!over) return;
+
+    const activeId = active.id;
+    const overId = over?.id;
+
+    if (activeId === overId) return;
+
+    const isActiveItem = active.data.current?.kind === Kind.item;
+
+    if (!isActiveItem) return;
+
+    const isOverContainer = over.data.current?.kind === Kind.container;
+
+    if (isOverContainer) {
+      const activeItem = items.find((i) => i.id === activeId);
+
+      if (!activeItem) return;
+
+      setItems((items) => {
+        const activeItemIndex = items.findIndex((i) => i.id === activeId);
+        items[activeItemIndex].containerId = overId;
+
+        return arrayMove(items, activeItemIndex, activeItemIndex);
+      });
+    } else {
+      const activeContainerId = items.find(
+        (i) => i.id === activeId
+      )?.containerId;
+      const overContainerId = items.find((i) => i.id === overId)?.containerId;
+
+      if (!activeContainerId || !overContainerId) return;
+
+      if (activeContainerId === overContainerId) {
+        const activeIndex = items.findIndex((i) => i.id === activeId);
+        const overIndex = items.findIndex((i) => i.id === overId);
+        setItems((prev) => arrayMove(prev, activeIndex, overIndex));
+      } else {
+        setItems((items) => {
+          const activeItemIndex = items.findIndex((i) => i.id === activeId);
+
+          if (activeItemIndex === -1) return items;
+
+          items[activeItemIndex].containerId = overContainerId;
+
+          return arrayMove(items, activeItemIndex, activeItemIndex);
+        });
+      }
+    }
   }
 
   return (
     <div className="max-w-5xl mx-auto p-5">
       <h1>Drag and Drop</h1>
-      <section className="grid grid-cols-3 gap-5">
+      <section className="grid grid-flow-col auto-cols-max gap-4 bg-gray-200 p-10 overflow-x-auto h-[400px]">
         <DndContext
           id={contextId}
           sensors={sensors}
           collisionDetection={closestCorners}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
+          onDragMove={handlerDragMove}
         >
           <SortableContext
-            items={containers.map((c) => c.id)}
+            items={containersIds}
             strategy={horizontalListSortingStrategy}
           >
             {containers.map((container) => (
@@ -123,24 +223,22 @@ export default function DndPage() {
                 title={container.title}
               >
                 <SortableContext
+                  disabled={activeElement?.kind === Kind.container}
                   items={items
-                    .filter((i) => i.containerId === container.id)
+                    .filter((item) => item.containerId === container.id)
                     .map((item) => item.id)}
                   strategy={verticalListSortingStrategy}
                 >
                   {items
-                    .filter((i) => i.containerId === container.id)
+                    .filter((item) => item.containerId === container.id)
                     .map((item) => (
-                      <Draggable
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                      />
+                      <Item key={item.id} id={item.id} title={item.title} />
                     ))}
                 </SortableContext>
               </Container>
             ))}
           </SortableContext>
+
           <DragOverlay>
             {activeElement && activeElement.kind === Kind.item && (
               <ItemInner
@@ -151,6 +249,7 @@ export default function DndPage() {
             )}
             {activeElement && activeElement.kind === Kind.container && (
               <ContainerInner
+                id={activeElement.id.toString()}
                 title={
                   containers.find(
                     (container) => container.id === activeElement.id
@@ -175,14 +274,20 @@ export default function DndPage() {
   );
 }
 
-function Draggable({ id, title }: { id: UniqueIdentifier; title: ReactNode }) {
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({
-      id,
-      data: {
-        kind: "item",
-      },
-    });
+function Item({ id, title }: { id: UniqueIdentifier; title: ReactNode }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id,
+    data: {
+      kind: Kind.item,
+    } satisfies Payload,
+  });
 
   return (
     <ItemInner
@@ -195,6 +300,7 @@ function Draggable({ id, title }: { id: UniqueIdentifier; title: ReactNode }) {
       {...attributes}
       {...listeners}
       title={title}
+      isDragging={isDragging}
     />
   );
 }
@@ -208,13 +314,21 @@ function Container({
   title: string;
   children: ReactNode;
 }) {
-  const { setNodeRef, attributes, listeners, transform, transition } =
-    useSortable({
-      id,
-      data: {
-        kind: "container",
-      },
-    });
+  const {
+    setNodeRef,
+    attributes,
+    listeners,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+    isSorting,
+  } = useSortable({
+    id,
+    data: {
+      kind: Kind.container,
+    } satisfies Payload,
+  });
 
   return (
     <ContainerInner
@@ -224,8 +338,10 @@ function Container({
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      className="border border-dashed border-gray-500 bg-gray-200 p-5 rounded-lg"
       title={title}
+      isDragging={isDragging}
+      isOver={isOver}
+      isSorting={isSorting}
       {...attributes}
       {...listeners}
     >
@@ -233,93 +349,3 @@ function Container({
     </ContainerInner>
   );
 }
-
-type ItemInnerProps = Omit<
-  ComponentProps<"div">,
-  "onKeyDown" | "onPointerDown" | "onTouchStart" | "children" | "title"
-> &
-  Pick<
-    ComponentProps<"button">,
-    "onKeyDown" | "onPointerDown" | "onTouchStart"
-  > & {
-    title: ReactNode;
-  };
-
-const ItemInner = forwardRef<ElementRef<"div">, ItemInnerProps>(
-  (
-    { title, onKeyDown, onPointerDown, onTouchStart, className, ...props },
-    ref
-  ) => {
-    return (
-      <div
-        ref={ref}
-        className={clsx(
-          "border bg-white p-5 rounded-lg flex items-center gap-2 justify-between",
-          className
-        )}
-        {...props}
-      >
-        <div>{title}</div>
-        <button
-          onKeyDown={onKeyDown}
-          onPointerDown={onPointerDown}
-          onTouchStart={onTouchStart}
-          className="flex items-center justify-center cursor-move"
-        >
-          <IconGripVertical className="size-4 shrink-0" />
-        </button>
-      </div>
-    );
-  }
-);
-
-ItemInner.displayName = "ItemInner";
-
-type ContainerInnerProps = Omit<
-  ComponentProps<"div">,
-  "onKeyDown" | "onPointerDown" | "onTouchStart" | "title"
-> &
-  Pick<
-    ComponentProps<"button">,
-    "onKeyDown" | "onPointerDown" | "onTouchStart"
-  > & {
-    title: ReactNode;
-  };
-
-const ContainerInner = forwardRef<ElementRef<"div">, ContainerInnerProps>(
-  (
-    {
-      title,
-      children,
-      onKeyDown,
-      onPointerDown,
-      onTouchStart,
-      className,
-      ...props
-    },
-    ref
-  ) => {
-    return (
-      <div
-        ref={ref}
-        className={clsx("border bg-indigo-200 p-5 rounded-lg", className)}
-        {...props}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <p>{title}</p>
-          <button
-            onKeyDown={onKeyDown}
-            onPointerDown={onPointerDown}
-            onTouchStart={onTouchStart}
-            className="flex items-center justify-center cursor-move"
-          >
-            <IconGripVertical className="size-4 shrink-0" />
-          </button>
-        </div>
-        <div className="space-y-2 mt-4">{children}</div>
-      </div>
-    );
-  }
-);
-
-ContainerInner.displayName = "ContainerInner";
