@@ -1,17 +1,15 @@
 "use client";
 
 import {
-  DataRef,
   DndContext,
   DragEndEvent,
-  DragMoveEvent,
+  DragOverEvent,
   DragOverlay,
   DragStartEvent,
   KeyboardSensor,
   PointerSensor,
   TouchSensor,
   UniqueIdentifier,
-  closestCenter,
   closestCorners,
   useSensor,
   useSensors,
@@ -25,18 +23,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { IconGripVertical } from "@tabler/icons-react";
-import clsx from "clsx";
-import {
-  ComponentProps,
-  ElementRef,
-  ReactNode,
-  forwardRef,
-  useId,
-  useMemo,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
+import { ReactNode, useId, useMemo, useState } from "react";
 import { ContainerInner } from "./container";
 import { ItemInner } from "./item";
 
@@ -62,10 +49,6 @@ type ContainerType = {
 
 type Payload = {
   kind: Kind;
-};
-
-type DataPayload = {
-  current?: Payload;
 };
 
 export default function DndPage() {
@@ -147,7 +130,7 @@ export default function DndPage() {
     setActiveElement(null);
   }
 
-  function handlerDragMove(event: DragMoveEvent) {
+  function handlerDragOver(event: DragOverEvent) {
     const { active, over } = event;
 
     if (!over) return;
@@ -210,7 +193,7 @@ export default function DndPage() {
           collisionDetection={closestCorners}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
-          onDragMove={handlerDragMove}
+          onDragOver={handlerDragOver}
         >
           <SortableContext
             items={containersIds}
